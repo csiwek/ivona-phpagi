@@ -1,15 +1,20 @@
 <?php 
 
 
-class IvonaAGI extends class AGI {
-
+class IvonaAGI extends AGI {
+    private $tmp = '/tmp';
+    private $sox = '/usr/bin/sox';
+    private $mpg123 = '/usr/bin/mpg123';
     private $enableDebug =1;
     private $format = null;
     private $codec = null;
     private $samplerate = null;
-
+    private $speed = 'slow';
+    private $lang  = 'en-GB';
+    private $voice = 'Amy';
     public function __construct()
     {
+	parent::__construct();
 	$this->debug(__METHOD__." Created instance of ".__CLASS__);
     }
 
@@ -24,12 +29,24 @@ class IvonaAGI extends class AGI {
 
 
 
-    public function say_tts($text, $lang = null, $speed = null, $noanswer=null)
+    public function say_tts($text, $lang = null, $voice = null, $speed = null, $noanswer=null)
     {
+	$ivona = new IvonaClient();
 
+	//$ivona->ListVoices("pl-PL", null);
+	if(!$lang){
+		$lang = $this->lang;
+	}
+	if(!$voice){
+		$voice = $this->voice;
+	}
+	if(!$speed){
+		$speed = $this->speed;
+	}	
+	$filename = $ivona->getSave($text, array('Language' => $lang, 'VoiceName'=>$voice, 'VoiceRate'=>$speed));
 	$this->convertMP3ToWAV($filename);
 	$this->detectFormat();
-	$destFile = $this->CreateAsteriskFile($speed);
+	$destFile = $this->CreateAsteriskFile($filename,$lang, $voice, $speed);
 	$this->debug(__METHOD__ . " Will try to play file: $destFile");
 	if($destFile) {
 		$playstring = $destFile;
@@ -37,39 +54,37 @@ class IvonaAGI extends class AGI {
 			$playstring .= ",noanswer";
 		}
 	}
-	//$this->agi->stream_file($this->destFile);
-	$this->agi->exec("Playback", $playstring);
+	$this->exec("Playback", $playstring);
     }
 
     private function convertMP3ToWAV($filename){
-		file_exists($filename.".wav")){
-		$this->debug(__METHOD__ . " WAV Filename already exists: ".$filename);
+		$pathParts = pathinfo($filename);
+		$WAVFilename = $pathParts['dirname'].'/'. basename($filename, ".mp3").".wav";
+		if(file_exists($WAVFilename)){
+			$this->debug(__METHOD__ . " WAV Filename already exists: $filename ".$WAVFilename);
 		return 1;
 	}
-	$mpg123cmd = $this->mpg123." -q -w $filename.wav $filename.mp3 ";
+	$mpg123cmd = $this->mpg123." -q -w $WAVFilename $filename ";
 	$this->debug(__METHOD__ . " executing mpg123: $mpg123cmd");
 	$retMpg123 = exec($mpg123cmd);
 	$this->debug(__METHOD__ . " mpg123 returned $retMpg123");
     }
 
-    private function CreateAsteriskFile($speed){
-	$destFile = $this->filename . "_" . $this->samplerate."_".$speed ;
+    private function CreateAsteriskFile($filename,$lang, $voice, $speed){
+	$pathParts = pathinfo($filename);
+	$destFile = $pathParts['dirname'].'/' . basename($filename, ".wav") . "_" . $this->samplerate."_".$lang . "_".$voice."_".$speed ;
 	if (file_exists($destFile . "." . $this->format)){
-		$this->debug(__METHOD__ . " Asterisk sound file already exists: ".$destFile." In ".$this->samplerate."_".$speed);
+		$this->debug(__METHOD__ . " Asterisk sound file already exists: ".$destFile);
 		return $destFile;
 	}
-	$soxcmd = $this->sox ." ". $this->filename.".wav -q -r " . $this->samplerate . " -t raw ". $destFile . "." . $this->format;
+	$soxcmd = $this->sox ." ". $filename . " -q -r " . $this->samplerate . " -t raw ". $destFile . "." . $this->format;
 	$this->debug(__METHOD__ . " executing sox: $soxcmd");
 	exec($soxcmd);
 	return $destFile;
     }
 
     private function detectFormat(){
-	if (!$this->agi){
-		$this->debug(__METHOD__ . " AGI not set. cannot detect the format");
-	exit;
-	}
-	$codec = $this->agi->get_variable("CHANNEL(audionativeformat)"); $codec = $codec['data'];
+	$codec = $this->get_variable("CHANNEL(audionativeformat)"); $codec = $codec['data'];
 	$this->debug(__METHOD__ . " Detected codec: $codec");
 	$this->codec = $codec;
 	if (preg_match('/(silk|sln)12/', $codec)) { $this->format = "sln12" ; $this->samplerate = 12000;}
